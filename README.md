@@ -1,1 +1,1 @@
-# lazy-scripts
+# scripts
