@@ -44,10 +44,10 @@ class MetricTrendlineAngle():
         self.scores, self.beta, self.xy, self.x, self.y, self.x2, self.n = {}, {}, {}, {}, {}, {}, {}
 
     def add(self, ticker, daysAgo, priceClose):
-        if ticker not in self.xy:# and daysAgo >= self.totalDays: # don't count stocks that don't have enough history
+        if ticker not in self.xy and daysAgo >= self.totalDays: # don't count stocks that don't have enough history
             self.xy[ticker] = self.x[ticker] = self.y[ticker] = self.x2[ticker] = self.n[ticker] = 0
         if ticker in self.xy and daysAgo <= self.totalDays: # skip older data
-            x, y = -daysAgo, priceClose
+            x, y = self.totalDays - daysAgo, priceClose
             self.xy[ticker] += x*y
             self.x[ticker] += x
             self.y[ticker] += y
@@ -83,11 +83,11 @@ procStart = datetime.datetime.now()
 # Metrics
 metric1 = MetricRecentPeakRatio(totalDays = 365, peakedPastDays = 10, showTop = 20)
 metric2 = MetricTrendlineAngle(totalDays = 5*365, showTop = 20)
-metric2.add("AA", 2, 3)
+'''metric2.add("AA", 2, 3)
 metric2.add("AA", 1, 5)
 metric2.add("AA", 0, 6.5)
 metric2.printResults()
-exit()
+exit()'''
 
 # Determine total amount of files and database end date
 for path, subdirs, files in os.walk(folderIn):
