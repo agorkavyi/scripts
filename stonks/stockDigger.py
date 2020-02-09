@@ -18,8 +18,7 @@ class MetricRecentPeakRatio():
 
     def add(self, ticker, daysAgo, priceClose):
         if ticker not in self.pastMax:
-            self.pastMax[ticker] = 0
-            self.recentMax[ticker] = 0
+            self.pastMax[ticker] = self.recentMax[ticker] = 0
         if daysAgo <= self.totalDays: # skip older data
             if daysAgo > self.peakedPastDays:
                 self.pastMax[ticker] = max(self.pastMax[ticker], priceClose)
@@ -37,6 +36,36 @@ class MetricRecentPeakRatio():
         for place, ticker in zip(range(self.showTop), sorted(self.scores, key=self.scores.get, reverse=True)[:self.showTop]):
             print(f"#{place+1}: {ticker} - {self.scores.get(ticker, 0):.3f}")
 
+# Metric : trend line angle
+class MetricTrendlineAngle():
+    def __init__(self, *args, **kwds):
+        self.totalDays = kwds.pop("totalDays", 365) # only consider how stock performed during last N days
+        self.showTop = kwds.pop("showTop", 20) # show top N winners
+        self.scores, self.beta, self.xy, self.x, self.y, self.x2, self.n = {}, {}, {}, {}, {}, {}, {}
+
+    def add(self, ticker, daysAgo, priceClose):
+        if ticker not in self.xy:# and daysAgo >= self.totalDays: # don't count stocks that don't have enough history
+            self.xy[ticker] = self.x[ticker] = self.y[ticker] = self.x2[ticker] = self.n[ticker] = 0
+        if ticker in self.xy and daysAgo <= self.totalDays: # skip older data
+            x, y = -daysAgo, priceClose
+            self.xy[ticker] += x*y
+            self.x[ticker] += x
+            self.y[ticker] += y
+            self.x2[ticker] += x*x
+            self.n[ticker] += 1
+
+    def printResults(self):
+        print(f"\n\n** Metric - Trend Line Angle **\n")
+        print(f"totalDays = {self.totalDays}\n")
+        for ticker in self.xy:
+            divisor = self.n[ticker]*self.x2[ticker] - self.x[ticker]*self.x[ticker]
+            if divisor != 0:
+                self.scores[ticker] = (self.n[ticker]*self.xy[ticker] - self.x[ticker]*self.y[ticker]) / divisor
+                self.beta[ticker] = (self.y[ticker] - self.scores[ticker]*self.x[ticker]) / self.n[ticker]
+                logging.debug(f"TrendlineAngle {ticker}: {self.scores[ticker]:.3f} x = {self.x[ticker]} y = {self.y[ticker]} beta = {self.beta[ticker]:.3f}")
+        for place, ticker in zip(range(self.showTop), sorted(self.scores, key=self.scores.get, reverse=True)[:self.showTop]):
+            print(f"#{place+1}: {ticker} - {self.scores[ticker]:.3f} - baseline: {self.beta[ticker]:.1f}")
+
 # MAIN
 if len(sys.argv) < 1:
     print("\nUsage: " + os.path.basename(sys.argv[0]) + " <InputFolder>\n")
@@ -53,6 +82,12 @@ procStart = datetime.datetime.now()
 
 # Metrics
 metric1 = MetricRecentPeakRatio(totalDays = 365, peakedPastDays = 10, showTop = 20)
+metric2 = MetricTrendlineAngle(totalDays = 5*365, showTop = 20)
+metric2.add("AA", 2, 3)
+metric2.add("AA", 1, 5)
+metric2.add("AA", 0, 6.5)
+metric2.printResults()
+exit()
 
 # Determine total amount of files and database end date
 for path, subdirs, files in os.walk(folderIn):
@@ -89,12 +124,16 @@ for path, subdirs, files in os.walk(folderIn):
                     daysAgo = (endDate - date).days
                     priceClose = float(sclose)
                     
+                    if ticker == "BRK-A.US": priceClose /= 1000 # workaround to prevent strange results when price is too high (Berkshire Hathaway)
+                    
                     metric1.add(ticker, daysAgo, priceClose)
+                    metric2.add(ticker, daysAgo, priceClose)
 
         except KeyboardInterrupt: raise
         except: print(f"Exception when processing {ticker}: {traceback.format_exc()}")
 
 metric1.printResults()
+metric2.printResults()
 timeElapsed = datetime.datetime.now() - procStart
 print(f"\nTotal days processed: {processedDays}")
 print(f"Time Elapsed: {timeElapsed.total_seconds():.2f} sec")
