@@ -114,6 +114,7 @@ class MetricPortfolioStabilityTotal():
     def __init__(self, *args, **kwds):
         self.totalDays = kwds.pop("totalDays", 365) # only consider how stock performed during last N days
         self.ignorePriceBelow = kwds.pop("ignorePriceBelow", 5) # don't consider stocks that cost below X on start
+        self.declinesWeight = kwds.pop("declinesWeight", 1) # 0 - declines have no effect, >1 - declines have extra weight
         self.showTop = kwds.pop("showTop", 20) # show top N winners
         self.scores, self.start, self.finish, self.declines, self.prevClose = {}, {}, {}, {}, {}
 
@@ -136,10 +137,11 @@ class MetricPortfolioStabilityTotal():
     def printResults(self):
         print(f"\n\n** Metric - Portfolio Appreciation Stability Total Adjusted (PASTA) **\n")
         print(f"totalDays = {self.totalDays}")
-        print(f"ignorePriceBelow = {self.ignorePriceBelow}\n")
+        print(f"ignorePriceBelow = {self.ignorePriceBelow}")
+        print(f"declinesWeight = {self.declinesWeight}\n")
         for ticker in self.start:
             if self.start[ticker] != 0:
-                self.declines[ticker] /= self.totalDays/365
+                self.declines[ticker] *= self.declinesWeight * 365/self.totalDays # trying to decrease effect of declines
                 self.scores[ticker] = self.finish[ticker] / self.start[ticker] - self.declines[ticker]
                 logging.debug(f"PortfolioStabilityTotal {ticker}: {self.scores[ticker]:.3f}, start = {self.start[ticker]:.2f}, finish = {self.finish[ticker]:.2f}, yearly.declines = {self.declines[ticker]:.2f}")
         for place, ticker in zip(range(self.showTop), sorted(self.scores, key=self.scores.get, reverse=True)[:self.showTop]):
@@ -165,7 +167,7 @@ procStart = datetime.datetime.now()
 metric1 = MetricRecentPeakRatio(totalDays = 365, peakedPastDays = 10, showTop = 20)
 metric2 = MetricPortfolioTrendlineAngle(totalDays = 5*365, origInvestment = 10000, showTop = 20)
 metric3 = MetricPortfolioStabilityPeak(totalDays = 13*365, ignorePriceBelow = 5, showTop = 20)
-metric4 = MetricPortfolioStabilityTotal(totalDays = 13*365, ignorePriceBelow = 5, showTop = 20)
+metric4 = MetricPortfolioStabilityTotal(totalDays = 13*365, ignorePriceBelow = 5, declinesWeight = 5, showTop = 20)
 
 # Determine total amount of files and database end date
 for path, subdirs, files in os.walk(folderIn):
