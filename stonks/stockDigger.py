@@ -8,9 +8,6 @@ import datetime
 
 logging.basicConfig(filename="debug.log", filemode='a', format='%(asctime)s %(levelname)s %(funcName)s() - %(message)s', level=logging.DEBUG)
 
-# Constants
-ORIG_CONTRIBUTION = 10000 # USD
-
 # Metric : ratio of recent maximum to previous maximum
 class MetricRecentPeakRatio():
     def __init__(self, *args, **kwds):
@@ -37,21 +34,23 @@ class MetricRecentPeakRatio():
                 self.scores[ticker] = self.recentMax[ticker] / self.pastMax[ticker]
                 logging.debug(f"RecentPeakRatio {ticker}: {self.recentMax[ticker]:.3f} / {self.pastMax[ticker]:.3f} = {self.scores[ticker]:.3f}")
         for place, ticker in zip(range(self.showTop), sorted(self.scores, key=self.scores.get, reverse=True)[:self.showTop]):
-            print(f"#{place+1}: {ticker} - {self.scores.get(ticker, 0):.3f}")
+            print(f"#{place+1:<3}: {ticker:<8} - {self.scores.get(ticker, 0):.3f}")
 
 # Metric : portfolio value trend line angle
 class MetricPortfolioTrendlineAngle():
     def __init__(self, *args, **kwds):
         self.totalDays = kwds.pop("totalDays", 365) # only consider how stock performed during last N days
+        self.origInvestment = kwds.pop("origInvestment", 10000) # USD
         self.showTop = kwds.pop("showTop", 20) # show top N winners
-        self.scores, self.beta, self.numStocks, self.xy, self.x, self.y, self.x2, self.n = {}, {}, {}, {}, {}, {}, {}, {}
+        self.scores, self.numStocks, self.xy, self.x, self.y, self.x2, self.n = {}, {}, {}, {}, {}, {}, {}
 
     def add(self, ticker, daysAgo, priceClose):
         if ticker not in self.xy and daysAgo >= self.totalDays: # don't count stocks that don't have enough history
             self.xy[ticker] = self.x[ticker] = self.y[ticker] = self.x2[ticker] = self.n[ticker] = 0
         if ticker in self.xy and daysAgo <= self.totalDays: # skip older data
+            if ticker == "BRK-A.US": priceClose /= 1000 # workaround to prevent strange results when price is too high (Berkshire Hathaway)
             if ticker not in self.numStocks:
-                self.numStocks[ticker] = ORIG_CONTRIBUTION / priceClose # initialize portfolio on the first day
+                self.numStocks[ticker] = self.origInvestment / priceClose # initialize portfolio on the first day
             x, y = self.totalDays - daysAgo, self.numStocks[ticker]*priceClose
             self.xy[ticker] += x*y
             self.x[ticker] += x
@@ -61,14 +60,92 @@ class MetricPortfolioTrendlineAngle():
 
     def printResults(self):
         print(f"\n\n** Metric - Portfolio Trend Line Angle **\n")
-        print(f"totalDays = {self.totalDays}\n")
+        print(f"totalDays = {self.totalDays}")
+        print(f"origInvestment = {self.origInvestment}\n")
         for ticker in self.xy:
             divisor = self.n[ticker]*self.x2[ticker] - self.x[ticker]*self.x[ticker]
             if divisor != 0:
                 self.scores[ticker] = (self.n[ticker]*self.xy[ticker] - self.x[ticker]*self.y[ticker]) / divisor
                 logging.debug(f"PortfolioTrendlineAngle {ticker}: {self.scores[ticker]:.3f}, numStocks = {self.numStocks[ticker]:.1f}")
         for place, ticker in zip(range(self.showTop), sorted(self.scores, key=self.scores.get, reverse=True)[:self.showTop]):
-            print(f"#{place+1}: {ticker} - {self.scores[ticker]:.3f}")
+            print(f"#{place+1:<3}: {ticker:<8} - {self.scores[ticker]:.3f}")
+        if "SPY.US" in self.scores:
+            print(f"#BENCHMARK SPY - {self.scores['SPY.US']:<6.3f}")
+
+# Metric : Portfolio Appreciation Stability Peak Adjusted = Growth Ratio * Maximum Experienced Decline Ratio
+class MetricPortfolioStabilityPeak():
+    def __init__(self, *args, **kwds):
+        self.totalDays = kwds.pop("totalDays", 365) # only consider how stock performed during last N days
+        self.ignorePriceBelow = kwds.pop("ignorePriceBelow", 5) # don't consider stocks that cost below X on start
+        self.showTop = kwds.pop("showTop", 20) # show top N winners
+        self.scores, self.start, self.finish, self.localHigh, self.maxLossSoFar = {}, {}, {}, {}, {}
+
+    def add(self, ticker, daysAgo, priceClose):
+        if ticker not in self.localHigh and daysAgo >= self.totalDays: # don't count stocks that don't have enough history
+            self.localHigh[ticker], self.maxLossSoFar[ticker] = 0, 1
+        if ticker in self.localHigh and daysAgo <= self.totalDays: # skip older data
+            if ticker not in self.start:
+                if priceClose < self.ignorePriceBelow:
+                    del self.localHigh[ticker] # stops processing of this ticker
+                    return
+                else:
+                    self.start[ticker] = priceClose # capture first day
+            self.finish[ticker] = priceClose # will capture last day
+            if self.localHigh[ticker] < priceClose: # update local price maximum if found
+                self.localHigh[ticker] = priceClose
+            else:
+                self.maxLossSoFar[ticker] = min(self.maxLossSoFar[ticker], priceClose / self.localHigh[ticker]) # update maximum encountered loss so far
+
+    def printResults(self):
+        print(f"\n\n** Metric - Portfolio Appreciation Stability Peak Adjusted (PASPA) **\n")
+        print(f"totalDays = {self.totalDays}")
+        print(f"ignorePriceBelow = {self.ignorePriceBelow}\n")
+        for ticker in self.start:
+            if self.start[ticker] != 0:
+                self.scores[ticker] = self.maxLossSoFar[ticker] * self.finish[ticker] / self.start[ticker]
+                logging.debug(f"PortfolioStabilityPeak {ticker}: {self.scores[ticker]:.3f}, start = {self.start[ticker]:.2f}, finish = {self.finish[ticker]:.2f}, maxLossSoFar = {self.maxLossSoFar[ticker]:.2f}")
+        for place, ticker in zip(range(self.showTop), sorted(self.scores, key=self.scores.get, reverse=True)[:self.showTop]):
+            print(f"#{place+1:<3}: {ticker:<8} - {self.scores[ticker]:<6.3f}  = Growth {self.finish[ticker] / self.start[ticker]:<6.3f} * Stability {self.maxLossSoFar[ticker]:.3f}")
+        if "SPY.US" in self.scores:
+            print(f"#BENCHMARK SPY - {self.scores['SPY.US']:<6.3f}  = Growth {self.finish['SPY.US'] / self.start['SPY.US']:<6.3f} * Stability {self.maxLossSoFar['SPY.US']:.3f}")
+            
+# Metric : Portfolio Appreciation Stability Total Adjusted = Growth Ratio - Avg Total Declines per Year
+class MetricPortfolioStabilityTotal():
+    def __init__(self, *args, **kwds):
+        self.totalDays = kwds.pop("totalDays", 365) # only consider how stock performed during last N days
+        self.ignorePriceBelow = kwds.pop("ignorePriceBelow", 5) # don't consider stocks that cost below X on start
+        self.showTop = kwds.pop("showTop", 20) # show top N winners
+        self.scores, self.start, self.finish, self.declines, self.prevClose = {}, {}, {}, {}, {}
+
+    def add(self, ticker, daysAgo, priceClose):
+        if ticker not in self.declines and daysAgo >= self.totalDays: # don't count stocks that don't have enough history
+            self.declines[ticker] = 0
+        if ticker in self.declines and daysAgo <= self.totalDays: # skip older data
+            if ticker not in self.start:
+                if priceClose < self.ignorePriceBelow:
+                    del self.declines[ticker] # stops processing of this ticker
+                    return
+                else:
+                    self.start[ticker] = priceClose # capture first day
+            self.finish[ticker] = priceClose # will capture last day
+            if ticker in self.prevClose:
+                if self.prevClose[ticker] > priceClose: # decline detected, add it up
+                    self.declines[ticker] += (self.prevClose[ticker] - priceClose) / self.prevClose[ticker]
+            self.prevClose[ticker] = priceClose
+
+    def printResults(self):
+        print(f"\n\n** Metric - Portfolio Appreciation Stability Total Adjusted (PASTA) **\n")
+        print(f"totalDays = {self.totalDays}")
+        print(f"ignorePriceBelow = {self.ignorePriceBelow}\n")
+        for ticker in self.start:
+            if self.start[ticker] != 0:
+                self.declines[ticker] /= self.totalDays/365
+                self.scores[ticker] = self.finish[ticker] / self.start[ticker] - self.declines[ticker]
+                logging.debug(f"PortfolioStabilityTotal {ticker}: {self.scores[ticker]:.3f}, start = {self.start[ticker]:.2f}, finish = {self.finish[ticker]:.2f}, yearly.declines = {self.declines[ticker]:.2f}")
+        for place, ticker in zip(range(self.showTop), sorted(self.scores, key=self.scores.get, reverse=True)[:self.showTop]):
+            print(f"#{place+1:<3}: {ticker:<8} - {self.scores[ticker]:<6.3f}  = Growth {self.finish[ticker] / self.start[ticker]:<6.3f} - YearlyDeclines {self.declines[ticker]:.3f}")
+        if "SPY.US" in self.scores:
+            print(f"#BENCHMARK SPY - {self.scores['SPY.US']:<6.3f}  = Growth {self.finish['SPY.US'] / self.start['SPY.US']:<6.3f} - YearlyDeclines {self.declines['SPY.US']:.3f}")
 
 # MAIN
 if len(sys.argv) < 1:
@@ -86,7 +163,9 @@ procStart = datetime.datetime.now()
 
 # Metrics
 metric1 = MetricRecentPeakRatio(totalDays = 365, peakedPastDays = 10, showTop = 20)
-metric2 = MetricPortfolioTrendlineAngle(totalDays = 5*365, showTop = 20)
+metric2 = MetricPortfolioTrendlineAngle(totalDays = 5*365, origInvestment = 10000, showTop = 20)
+metric3 = MetricPortfolioStabilityPeak(totalDays = 13*365, ignorePriceBelow = 5, showTop = 20)
+metric4 = MetricPortfolioStabilityTotal(totalDays = 13*365, ignorePriceBelow = 5, showTop = 20)
 
 # Determine total amount of files and database end date
 for path, subdirs, files in os.walk(folderIn):
@@ -123,16 +202,18 @@ for path, subdirs, files in os.walk(folderIn):
                     daysAgo = (endDate - date).days
                     priceClose = float(sclose)
                     
-                    if ticker == "BRK-A.US": priceClose /= 1000 # workaround to prevent strange results when price is too high (Berkshire Hathaway)
-                    
                     metric1.add(ticker, daysAgo, priceClose)
                     metric2.add(ticker, daysAgo, priceClose)
+                    metric3.add(ticker, daysAgo, priceClose)
+                    metric4.add(ticker, daysAgo, priceClose)
 
         except KeyboardInterrupt: raise
         except: print(f"Exception when processing {ticker}: {traceback.format_exc()}")
 
 metric1.printResults()
 metric2.printResults()
+metric3.printResults()
+metric4.printResults()
 timeElapsed = datetime.datetime.now() - procStart
 print(f"\nTotal days processed: {processedDays}")
 print(f"Time Elapsed: {timeElapsed.total_seconds():.2f} sec")
