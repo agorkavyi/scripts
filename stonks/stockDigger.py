@@ -149,8 +149,46 @@ class MetricPortfolioStabilityTotal():
         if "SPY.US" in self.scores:
             print(f"#BENCHMARK SPY - {self.scores['SPY.US']:<6.3f}  = Growth {self.finish['SPY.US'] / self.start['SPY.US']:<6.3f} - YearlyDeclines {self.declines['SPY.US']:.3f}")
 
+# Metric : largest difference between two dates (startDate - endDate), used to find cheap stocks
+class MetricLargestDiffBetween():
+    def __init__(self, *args, **kwds):
+        self.startDate = kwds.pop("startDate", datetime.date.today()) # if startDate is before endDate then look for drops, otherwise for rises
+        self.endDate = kwds.pop("endDate", datetime.date.today())     #
+        self.onlyDropsToNDaysBack = kwds.pop("onlyDropsToNDaysBack", None) # don't include drops unless they return stock price to at least N days back from startDate
+        self.ignorePriceBelow = kwds.pop("ignorePriceBelow", 10) # don't consider stocks that cost below X
+        self.showTop = kwds.pop("showTop", 20) # show top N winners
+        self.minDate = min(self.startDate, self.endDate)
+        self.nDaysBackFromStart = self.minDate + datetime.timedelta(days = -self.onlyDropsToNDaysBack) if (self.onlyDropsToNDaysBack and self.startDate < self.endDate) else None
+        self.scores, self.start, self.end, self.minPriceBeforeNDays = {}, {}, {}, {}
+
+    def add(self, ticker, date, priceClose):
+        if self.nDaysBackFromStart and date >= self.nDaysBackFromStart and date < self.minDate:
+            self.minPriceBeforeNDays[ticker] = min(self.minPriceBeforeNDays.get(ticker, sys.maxsize), priceClose)
+        elif date == self.startDate:
+            self.start[ticker] = priceClose
+        elif date == self.endDate:
+            self.end[ticker] = priceClose
+
+    def printResults(self):
+        print(f"\n\n** Metric - Largest % Difference Between Two Dates **\n")
+        print(f"startDate = {self.startDate}")
+        print(f"endDate = {self.endDate}")
+        print(f"onlyDropsToNDaysBack = {self.onlyDropsToNDaysBack}")
+        print(f"ignorePriceBelow = {self.ignorePriceBelow}\n")
+        for ticker in self.start:
+            if ticker in self.end and \
+            self.start[ticker] >= self.ignorePriceBelow and \
+            self.end[ticker] >= self.ignorePriceBelow and \
+            (self.nDaysBackFromStart == None or self.minPriceBeforeNDays[ticker] <= self.end[ticker]):
+                self.scores[ticker] = 100*(self.start[ticker] / self.end[ticker] - 1)
+                logging.debug(f"LargestDiffBetween {ticker}: {self.scores[ticker]:.3f}, start = {self.start[ticker]:.2f}, end = {self.end[ticker]:.2f}, minPriceBefore = {self.minPriceBeforeNDays.get(ticker, -1)}")
+        for place, ticker in zip(range(self.showTop), sorted(self.scores, key=self.scores.get, reverse=True)[:self.showTop]):
+            print(f"#{place+1:<3}: {ticker:<8} - {self.scores[ticker]:<6.3f}  = {self.start[ticker]:<6.3f} > {self.end[ticker]:<6.3f}")
+        if "SPY.US" in self.scores:
+            print(f"#BENCHMARK SPY - {self.scores['SPY.US']:<6.3f}  = {self.start['SPY.US']:<6.3f} > {self.end['SPY.US']:<6.3f}")
+            
 # MAIN
-if len(sys.argv) < 1:
+if len(sys.argv) < 2:
     print("\nUsage: " + os.path.basename(sys.argv[0]) + " <InputFolder>\n")
     print("Example: " + os.path.basename(sys.argv[0]) + " daily")
     exit()
@@ -168,6 +206,7 @@ metric1 = MetricRecentPeakRatio(totalDays = 365, peakedPastDays = 10, showTop = 
 metric2 = MetricPortfolioTrendlineAngle(totalDays = 5*365, origInvestment = 10000, showTop = 20)
 metric3 = MetricPortfolioStabilityPeak(totalDays = 13*365, ignorePriceBelow = 5, showTop = 20)
 metric4 = MetricPortfolioStabilityTotal(totalDays = 13*365, ignorePriceBelow = 5, declinesWeight = 5, showTop = 20)
+metric5 = MetricLargestDiffBetween(startDate = datetime.date(2020, 2, 19), endDate = datetime.date(2020, 3, 6), onlyDropsToNDaysBack = 365, ignorePriceBelow = 10, showTop = 40)
 
 # Determine total amount of files and database end date
 for path, subdirs, files in os.walk(folderIn):
@@ -177,12 +216,12 @@ for path, subdirs, files in os.walk(folderIn):
             # Read contents of file with prices
             with open(path + "\\" + file, "r") as fileIn:
                 for line in fileIn:
-                    if line[0] == 'D': continue # skip the header that starts with "Date"
-                    sdate = line.split(",")[0]
+                    if line[0] == '<': continue # skip the header that starts with "<TICKER>"
+                    sdate = line.split(",")[2]
                     endDate = datetime.date(int(sdate[:4]), int(sdate[4:6]), int(sdate[6:8])) # fast date parser
 
 print(f"\nStocks/ETFs in the database: {totalFiles}")
-print(f"Detected End Date: {endDate:%Y-%m-%d}\n")
+if endDate: print(f"Detected End Date: {endDate:%Y-%m-%d}\n")
 
 # Walk through Stooq database folder structure
 for path, subdirs, files in os.walk(folderIn):
@@ -196,8 +235,8 @@ for path, subdirs, files in os.walk(folderIn):
             # Read contents of file with prices
             with open(path + "\\" + file, "r") as fileIn:
                 for line in fileIn:
-                    if line[0] == 'D': continue # skip the header that starts with "Date"
-                    (sdate,sopen,shigh,slow,sclose,svolume,sopenint) = line.split(",") # parsing the day line
+                    if line[0] == '<': continue # skip the header that starts with "<TICKER>"
+                    (ticker,period,sdate,stime,sopen,shigh,slow,sclose,svolume,sopenint) = line.split(",") # parsing the day line
                     processedDays += 1
                     
                     date = datetime.date(int(sdate[:4]), int(sdate[4:6]), int(sdate[6:8])) # fast date parser
@@ -208,6 +247,7 @@ for path, subdirs, files in os.walk(folderIn):
                     metric2.add(ticker, daysAgo, priceClose)
                     metric3.add(ticker, daysAgo, priceClose)
                     metric4.add(ticker, daysAgo, priceClose)
+                    metric5.add(ticker, date, priceClose)
 
         except KeyboardInterrupt: raise
         except: print(f"Exception when processing {ticker}: {traceback.format_exc()}")
@@ -216,6 +256,7 @@ metric1.printResults()
 metric2.printResults()
 metric3.printResults()
 metric4.printResults()
+metric5.printResults()
 timeElapsed = datetime.datetime.now() - procStart
 print(f"\nTotal days processed: {processedDays}")
 print(f"Time Elapsed: {timeElapsed.total_seconds():.2f} sec")
