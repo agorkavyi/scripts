@@ -8,6 +8,13 @@ import datetime
 
 logging.basicConfig(filename="debug.log", filemode='a', format='%(asctime)s %(levelname)s %(funcName)s() - %(message)s', level=logging.DEBUG)
 
+leveragedETFs = {"TQQQ", "SSO", "QLD", "FLGE", "FIHD", "NUGT", "FBGX", "FRLG", "UPRO", "FAS", "TECL", "SPXL", "TVIX", "FIYY", "SOXL", "JNUG", "UYG", "TNA", "UWT", "UGAZ", "UVXY", "UCO", "UDOW", "BRZU", "ROM", "LABU", "YINN", "TMF", "MRRL", "DDM",
+                 "USLV", "MORL", "UGLD", "FNGU", "ERX", "AGQ", "OILU", "EDC", "UWM", "GUSH", "BIB", "REML", "UGL", "URE", "CURE", "CEFL", "MVV", "CHAU", "DGP", "PFFA", "CEFZ", "BDCL", "EUO", "RXL", "LBDC", "USD", "MLPQ", "UBT", "FNGO", "NAIL",
+                 "URTY", "CWEB", "RUSL", "DIG", "INDL", "DRN", "UST", "DFEN", "SMHB", "GASL", "BOIL", "PFFL", "YCS", "UYM", "MIDU", "SMHD", "DVYL", "UPW", "NRGO", "XPP", "PPLC", "BNKO", "FIEE", "HDLB", "BDCY", "DPST", "UBIO", "BNKU", "SAA",
+                 "EURL", "UCC", "NRGU", "EET", "LMLB", "TYD", "DVHL", "LMLP", "WTIU", "KORU", "UXI", "HDLV", "FEUL", "UBOT", "SDYL", "UMDD", "MLPZ", "FINU", "UTSL", "JPNL", "DZK", "LBJ", "AMJL", "SPUU", "DRR", "MEXX", "MJO", "PILL", "UGE",
+                 "RETL", "FFEU", "WEBL", "PPSC", "CROC", "DTYL", "DTUL", "NEED", "EUFL", "DFVL", "WANT", "ULE", "UBR", "UJB", "EFO", "EZJ", "UPV", "TPOR", "DLBR", "HIBL", "LRET", "TAWK", "HOML", "YCL", "SMLL", "DUSL", "UGBP", "LTL", "FLEU",
+                 "DEUR", "UCOM", "XCOM", "UEUR", "DAUD", "PPMC", "UCHF", "PPDM", "DGBP", "UJPY", "PPEM", "DJPY", "DCHF", "UAUD", "URR"}
+
 # Metric : ratio of recent maximum to previous maximum
 class MetricRecentPeakRatio():
     def __init__(self, *args, **kwds):
@@ -149,21 +156,24 @@ class MetricPortfolioStabilityTotal():
         if "SPY.US" in self.scores:
             print(f"#BENCHMARK SPY - {self.scores['SPY.US']:<6.3f}  = Growth {self.finish['SPY.US'] / self.start['SPY.US']:<6.3f} - YearlyDeclines {self.declines['SPY.US']:.3f}")
 
-# Metric : largest difference between two dates (startDate - endDate), used to find cheap stocks
+# Metric : largest difference between two trading(!) dates (startDate - endDate), used to find cheap stocks
 class MetricLargestDiffBetween():
     def __init__(self, *args, **kwds):
         self.startDate = kwds.pop("startDate", datetime.date.today()) # if startDate is before endDate then look for drops, otherwise for rises
         self.endDate = kwds.pop("endDate", datetime.date.today())     #
-        self.onlyDropsToNDaysBack = kwds.pop("onlyDropsToNDaysBack", None) # don't include drops unless they return stock price to at least N days back from startDate
-        self.ignorePriceBelow = kwds.pop("ignorePriceBelow", 10) # don't consider stocks that cost below X
+        self.grewLongerThanDays = kwds.pop("grewLongerThanDays", None)   # exclude stocks that didn't grow N days before the drop/rise happened
+        self.grewMoreThanPercent = kwds.pop("grewMoreThanPercent", 1) # exclude stocks that didn't grow at least X% during those N days
+        self.ignorePriceBelow = kwds.pop("ignorePriceBelow", 10) # exclude stocks that cost below X
+        self.ignoreLeveragedETFs = kwds.pop("ignoreLeveragedETFs", True) # exclude leveraged ETFs
         self.showTop = kwds.pop("showTop", 20) # show top N winners
         self.minDate = min(self.startDate, self.endDate)
-        self.nDaysBackFromStart = self.minDate + datetime.timedelta(days = -self.onlyDropsToNDaysBack) if (self.onlyDropsToNDaysBack and self.startDate < self.endDate) else None
-        self.scores, self.start, self.end, self.minPriceBeforeNDays = {}, {}, {}, {}
+        self.grewCoeff = 1.0 + self.grewMoreThanPercent/100
+        self.nDaysBackFromStart = self.minDate + datetime.timedelta(days = -self.grewLongerThanDays) if self.grewLongerThanDays else None
+        self.scores, self.start, self.end, self.priceNDaysBack = {}, {}, {}, {}
 
     def add(self, ticker, date, priceClose):
-        if self.nDaysBackFromStart and date >= self.nDaysBackFromStart and date < self.minDate:
-            self.minPriceBeforeNDays[ticker] = min(self.minPriceBeforeNDays.get(ticker, sys.maxsize), priceClose)
+        if self.nDaysBackFromStart and ticker not in self.priceNDaysBack and date >= self.nDaysBackFromStart:
+            self.priceNDaysBack[ticker] = priceClose
         elif date == self.startDate:
             self.start[ticker] = priceClose
         elif date == self.endDate:
@@ -173,15 +183,19 @@ class MetricLargestDiffBetween():
         print(f"\n\n** Metric - Largest % Difference Between Two Dates **\n")
         print(f"startDate = {self.startDate}")
         print(f"endDate = {self.endDate}")
-        print(f"onlyDropsToNDaysBack = {self.onlyDropsToNDaysBack}")
+        print(f"grewLongerThanDays = {self.grewLongerThanDays}")
+        print(f"grewMoreThanPercent = {self.grewMoreThanPercent}")
+        print(f"ignoreLeveragedETFs = {self.ignoreLeveragedETFs}")
         print(f"ignorePriceBelow = {self.ignorePriceBelow}\n")
+        drops = (self.startDate < self.endDate)
         for ticker in self.start:
             if ticker in self.end and \
             self.start[ticker] >= self.ignorePriceBelow and \
             self.end[ticker] >= self.ignorePriceBelow and \
-            (self.nDaysBackFromStart == None or self.minPriceBeforeNDays[ticker] <= self.end[ticker]):
+            (self.ignoreLeveragedETFs == False or ticker.split('.')[0] not in leveragedETFs) and \
+            (self.nDaysBackFromStart == None or (self.start[ticker] if drops else self.end[ticker])/self.priceNDaysBack[ticker] >= self.grewCoeff):
                 self.scores[ticker] = 100*(self.start[ticker] / self.end[ticker] - 1)
-                logging.debug(f"LargestDiffBetween {ticker}: {self.scores[ticker]:.3f}, start = {self.start[ticker]:.2f}, end = {self.end[ticker]:.2f}, minPriceBefore = {self.minPriceBeforeNDays.get(ticker, -1)}")
+                logging.debug(f"LargestDiffBetween {ticker}: {self.scores[ticker]:.3f}, start = {self.start[ticker]:.2f}, end = {self.end[ticker]:.2f}, priceNDaysBack = {self.priceNDaysBack.get(ticker, -1)}")
         for place, ticker in zip(range(self.showTop), sorted(self.scores, key=self.scores.get, reverse=True)[:self.showTop]):
             print(f"#{place+1:<3}: {ticker:<8} - {self.scores[ticker]:<6.3f}  = {self.start[ticker]:<6.3f} > {self.end[ticker]:<6.3f}")
         if "SPY.US" in self.scores:
@@ -206,7 +220,13 @@ metric1 = MetricRecentPeakRatio(totalDays = 365, peakedPastDays = 10, showTop = 
 metric2 = MetricPortfolioTrendlineAngle(totalDays = 5*365, origInvestment = 10000, showTop = 20)
 metric3 = MetricPortfolioStabilityPeak(totalDays = 13*365, ignorePriceBelow = 5, showTop = 20)
 metric4 = MetricPortfolioStabilityTotal(totalDays = 13*365, ignorePriceBelow = 5, declinesWeight = 5, showTop = 20)
-metric5 = MetricLargestDiffBetween(startDate = datetime.date(2020, 2, 19), endDate = datetime.date(2020, 3, 6), onlyDropsToNDaysBack = 365, ignorePriceBelow = 10, showTop = 40)
+metric5 = MetricLargestDiffBetween(startDate = datetime.date(2020, 2, 19), \
+                                   endDate = datetime.date(2020, 3, 6), \
+                                   #grewLongerThanDays = 10*365, \
+                                   #grewMoreThanPercent = 200, \
+                                   ignoreLeveragedETFs = True, \
+                                   ignorePriceBelow = 3, \
+                                   showTop = 40)
 
 # Determine total amount of files and database end date
 for path, subdirs, files in os.walk(folderIn):
