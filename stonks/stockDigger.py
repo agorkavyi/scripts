@@ -172,7 +172,7 @@ class MetricLargestDiffBetween():
         self.scores, self.start, self.end, self.priceNDaysBack = {}, {}, {}, {}
 
     def add(self, ticker, date, priceClose):
-        if self.nDaysBackFromStart and ticker not in self.priceNDaysBack and date >= self.nDaysBackFromStart:
+        if self.nDaysBackFromStart and date <= self.nDaysBackFromStart:
             self.priceNDaysBack[ticker] = priceClose
         elif date == self.startDate:
             self.start[ticker] = priceClose
@@ -189,11 +189,11 @@ class MetricLargestDiffBetween():
         print(f"ignorePriceBelow = {self.ignorePriceBelow}\n")
         drops = (self.startDate < self.endDate)
         for ticker in self.start:
-            if ticker in self.end and \
+            if ticker in self.end and (ticker == "SPY.US" or \
             self.start[ticker] >= self.ignorePriceBelow and \
             self.end[ticker] >= self.ignorePriceBelow and \
             (self.ignoreLeveragedETFs == False or ticker.split('.')[0] not in leveragedETFs) and \
-            (self.nDaysBackFromStart == None or (self.start[ticker] if drops else self.end[ticker])/self.priceNDaysBack[ticker] >= self.grewCoeff):
+            (self.nDaysBackFromStart == None or (self.start[ticker] if drops else self.end[ticker])/self.priceNDaysBack.get(ticker, sys.maxsize) >= self.grewCoeff)):
                 self.scores[ticker] = 100*(self.start[ticker] / self.end[ticker] - 1)
                 logging.debug(f"LargestDiffBetween {ticker}: {self.scores[ticker]:.3f}, start = {self.start[ticker]:.2f}, end = {self.end[ticker]:.2f}, priceNDaysBack = {self.priceNDaysBack.get(ticker, -1)}")
         for place, ticker in zip(range(self.showTop), sorted(self.scores, key=self.scores.get, reverse=True)[:self.showTop]):
@@ -216,16 +216,16 @@ folderIn = sys.argv[1]
 procStart = datetime.datetime.now()
 
 # Metrics
-metric1 = MetricRecentPeakRatio(totalDays = 365, peakedPastDays = 10, showTop = 20)
+metric1 = MetricRecentPeakRatio(totalDays = 5*365, peakedPastDays = 1, showTop = 20)
 metric2 = MetricPortfolioTrendlineAngle(totalDays = 5*365, origInvestment = 10000, showTop = 20)
 metric3 = MetricPortfolioStabilityPeak(totalDays = 13*365, ignorePriceBelow = 5, showTop = 20)
 metric4 = MetricPortfolioStabilityTotal(totalDays = 13*365, ignorePriceBelow = 5, declinesWeight = 5, showTop = 20)
 metric5 = MetricLargestDiffBetween(startDate = datetime.date(2020, 2, 19), \
-                                   endDate = datetime.date(2020, 3, 6), \
-                                   #grewLongerThanDays = 10*365, \
-                                   #grewMoreThanPercent = 200, \
+                                   endDate = datetime.date(2020, 6, 8), \
+                                   grewLongerThanDays = 1*365, \
+                                   grewMoreThanPercent = 20, \
                                    ignoreLeveragedETFs = True, \
-                                   ignorePriceBelow = 3, \
+                                   ignorePriceBelow = 15, \
                                    showTop = 40)
 
 # Determine total amount of files and database end date
@@ -264,10 +264,10 @@ for path, subdirs, files in os.walk(folderIn):
                     priceClose = float(sclose)
                     
                     metric1.add(ticker, daysAgo, priceClose)
-                    metric2.add(ticker, daysAgo, priceClose)
-                    metric3.add(ticker, daysAgo, priceClose)
-                    metric4.add(ticker, daysAgo, priceClose)
-                    metric5.add(ticker, date, priceClose)
+                    #metric2.add(ticker, daysAgo, priceClose)
+                    #metric3.add(ticker, daysAgo, priceClose)
+                    #metric4.add(ticker, daysAgo, priceClose)
+                    #metric5.add(ticker, date, priceClose)
 
         except KeyboardInterrupt: raise
         except: print(f"Exception when processing {ticker}: {traceback.format_exc()}")
