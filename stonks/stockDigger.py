@@ -201,6 +201,32 @@ class MetricLargestDiffBetween():
         if "SPY.US" in self.scores:
             print(f"#BENCHMARK SPY - {self.scores['SPY.US']:<6.3f}  = {self.start['SPY.US']:<6.3f} > {self.end['SPY.US']:<6.3f}")
             
+# Metric : min/max/average price of particular stock between the dates
+class MetricMinMaxAvgPriceBetween():
+    def __init__(self, *args, **kwds):
+        self.startDate = kwds.pop("startDate", datetime.date.today()) # if startDate should be before endDate
+        self.endDate = kwds.pop("endDate", datetime.date.today())     #
+        self.ticker = kwds.pop("ticker", "FB.US")
+        self.average, self.count, self.max, self.min = 0, 0, 0, sys.maxsize
+
+    def add(self, ticker, date, priceClose):
+        if ticker == self.ticker and date >= self.startDate and date <= self.endDate:
+            self.average += priceClose
+            self.count += 1
+            self.min = min(self.min, priceClose)
+            self.max = max(self.max, priceClose)
+
+    def printResults(self):
+        print(f"\n\n** Metric - Min / Max / Average Between Two Dates **\n")
+        print(f"startDate = {self.startDate}")
+        print(f"endDate = {self.endDate}")
+        print(f"ticker = {self.ticker}")
+        if self.count > 0:
+            self.average = self.average/self.count
+        print(f"# Minimum: {self.min:<6.2f}")
+        print(f"# Maximum: {self.max:<6.2f}")
+        print(f"# Average: {self.average:<6.2f} over {self.count} trading days")
+            
 # MAIN
 if len(sys.argv) < 2:
     print("\nUsage: " + os.path.basename(sys.argv[0]) + " <InputFolder>\n")
@@ -227,6 +253,9 @@ metric5 = MetricLargestDiffBetween(startDate = datetime.date(2020, 2, 19), \
                                    ignoreLeveragedETFs = True, \
                                    ignorePriceBelow = 15, \
                                    showTop = 40)
+metric6 = MetricMinMaxAvgPriceBetween(startDate = datetime.date(2021, 4, 1), \
+                                      endDate = datetime.date(2021, 4, 30), \
+                                      ticker = "FB.US")
 
 # Determine total amount of files and database end date
 for path, subdirs, files in os.walk(folderIn):
@@ -263,20 +292,22 @@ for path, subdirs, files in os.walk(folderIn):
                     daysAgo = (endDate - date).days
                     priceClose = float(sclose)
                     
-                    metric1.add(ticker, daysAgo, priceClose)
+                    #metric1.add(ticker, daysAgo, priceClose)
                     #metric2.add(ticker, daysAgo, priceClose)
                     #metric3.add(ticker, daysAgo, priceClose)
                     #metric4.add(ticker, daysAgo, priceClose)
                     #metric5.add(ticker, date, priceClose)
+                    metric6.add(ticker, date, priceClose)
 
         except KeyboardInterrupt: raise
         except: print(f"Exception when processing {ticker}: {traceback.format_exc()}")
 
-metric1.printResults()
-metric2.printResults()
-metric3.printResults()
-metric4.printResults()
-metric5.printResults()
+#metric1.printResults()
+#metric2.printResults()
+#metric3.printResults()
+#metric4.printResults()
+#metric5.printResults()
+metric6.printResults()
 timeElapsed = datetime.datetime.now() - procStart
 print(f"\nTotal days processed: {processedDays}")
 print(f"Time Elapsed: {timeElapsed.total_seconds():.2f} sec")
