@@ -16,29 +16,25 @@ parser.add_argument('inputMask', help='mask of JSON input files, for example \'d
 parser.add_argument('outputFile', help='name of CSV output file, for example \'gogOrders.csv\'')
 args = parser.parse_args()
 
-try:
-    for filename in glob.glob(args.inputMask):
-        with open(filename, 'r') as f:
-            gog = json.loads(f.read())
-            orderCount = len(gog['orders'])
-            print(f'{filename} contains {orderCount} orders, parsing ...')
-except Exception as e:
-    print(f'Error happened on {filename} - {str(e)}')
-
-'''try:
-    page = 1
-    while True:
-        req = urllib.request.Request(getOrdersURL % page)
-        resp = urllib.request.urlopen(req)
-        respData = resp.read().decode('utf-8')
-        print(getOrdersURL % page)
-        if 'html' in respData[:25]: # if it looks like HTML page
-            print('Please login to GOG.com first ...')
-            time.sleep(2)
-            webbrowser.open(resp.geturl())
-            break
-        print(respData)
-        resp.close()
-        break
-except Exception as e:
-    print('Error happened ' + str(e))'''
+with open(args.outputFile, "w", encoding="utf-8") as csvOut:
+    csvOut.write(f'Title, PricePaid, PriceBase\n')
+    totalOrderCount, totalPricePaid, totalPriceBase = 0, 0, 0
+    try:
+        for filename in glob.glob(args.inputMask):
+            with open(filename, 'r') as f:
+                gog = json.loads(f.read())
+                orderCount = len(gog['orders'])
+                totalOrderCount += orderCount
+                print(f'{filename} contains {orderCount} orders, parsing ...')
+                for order in gog['orders']:
+                    for product in order['products']:
+                        title = product['title']
+                        pricePaid = product['price']['amount']
+                        priceBase = product['price']['baseAmount']
+                        totalPricePaid += float(pricePaid)
+                        totalPriceBase += float(priceBase)
+                        csvOut.write(f'"{title}", {pricePaid}, {priceBase}\n')
+    except Exception as e:
+        print(f'Error happened on {filename} - {str(e)}')
+    print(f'Total {totalOrderCount} orders, paid ${totalPricePaid:.2f} for products worth ${totalPriceBase:.2f}')
+    csvOut.close()
