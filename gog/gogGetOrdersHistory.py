@@ -7,6 +7,7 @@
 import argparse
 import glob
 import json
+import datetime
 
 parser = argparse.ArgumentParser(description='<< Parse GOG.com orders history >> v1.0\n\n' +
     'To use login to GOG first and download all JSONs of completed orders using URL with page numbers 1-N:\n'
@@ -17,7 +18,7 @@ parser.add_argument('outputFile', help='name of CSV output file, for example \'g
 args = parser.parse_args()
 
 with open(args.outputFile, "w", encoding="utf-8") as csvOut:
-    csvOut.write(f'Title, PricePaid, PriceBase\n')
+    csvOut.write(f'Date, Title, PricePaid, PriceBase\n')
     totalOrderCount, totalPricePaid, totalPriceBase = 0, 0, 0
     try:
         for filename in glob.glob(args.inputMask):
@@ -27,13 +28,14 @@ with open(args.outputFile, "w", encoding="utf-8") as csvOut:
                 totalOrderCount += orderCount
                 print(f'{filename} contains {orderCount} orders, parsing ...')
                 for order in gog['orders']:
+                    orderDate = datetime.datetime.fromtimestamp(order['date'])
                     for product in order['products']:
                         title = product['title']
                         pricePaid = product['price']['amount']
                         priceBase = product['price']['baseAmount']
                         totalPricePaid += float(pricePaid)
                         totalPriceBase += float(priceBase)
-                        csvOut.write(f'"{title}", {pricePaid}, {priceBase}\n')
+                        csvOut.write(f'"{orderDate}","{title}",{pricePaid},{priceBase}\n')
     except Exception as e:
         print(f'Error happened on {filename} - {str(e)}')
     print(f'Total {totalOrderCount} orders, paid ${totalPricePaid:.2f} for products worth ${totalPriceBase:.2f}')
